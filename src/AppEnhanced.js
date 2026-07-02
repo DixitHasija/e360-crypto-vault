@@ -1,5 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './AppEnhanced.css';
+
+/* Small inline icons — no external deps */
+const LockIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="5" y="11" width="14" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </svg>
+);
+
+const EyeIcon = ({ open }) => (
+  open ? (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ) : (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3l18 18" />
+      <path d="M10.6 10.6a3 3 0 0 0 4.2 4.2" />
+      <path d="M9.4 5.2A9.5 9.5 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.8" />
+      <path d="M6.2 6.2A17 17 0 0 0 2 12s3.5 7 10 7a9.3 9.3 0 0 0 3-.5" />
+    </svg>
+  )
+);
 
 function AppEnhanced() {
   const [formData, setFormData] = useState({
@@ -12,10 +39,13 @@ function AppEnhanced() {
   });
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState(null);
-  const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
   const [isSmallScreen, setIsSmallScreen] = useState(false);
+  const [showSecret, setShowSecret] = useState(false);
+  const [showOutput, setShowOutput] = useState(true);
+  const [resultTime, setResultTime] = useState('');
+  const formRef = useRef(null);
 
   useEffect(() => {
     const updateIsSmallScreen = () => {
@@ -25,6 +55,20 @@ function AppEnhanced() {
     window.addEventListener('resize', updateIsSmallScreen);
     return () => window.removeEventListener('resize', updateIsSmallScreen);
   }, []);
+
+  // Keyboard console affordances: Cmd/Ctrl+Enter submits, Esc dismisses the ledger.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (!loading && formRef.current) formRef.current.requestSubmit();
+      } else if (e.key === 'Escape') {
+        setShowModal(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [loading]);
 
 
   const operationCategories = [
@@ -141,17 +185,33 @@ function AppEnhanced() {
            operationValue === 'MONGO_CSFLE_DETERMINISTIC_ENCRYPTION';
   };
 
+  // Derive trust micro-tags from the existing description text (no new data).
+  const deriveTags = (desc) => {
+    if (!desc) return [];
+    const d = desc.toLowerCase();
+    const tags = [];
+    if (d.includes('weak')) tags.push('WEAK');
+    if (d.includes('one-way')) tags.push('ONE-WAY');
+    if (d.includes('deterministic') || d.includes('same input')) tags.push('DETERMINISTIC');
+    if (d.includes('random')) tags.push('RANDOM');
+    return tags;
+  };
+
   const copyToClipboard = async (text) => {
     try {
       await navigator.clipboard.writeText(text);
       const copyBtn = document.querySelector('.copy-btn');
-      const originalText = copyBtn.textContent;
-      copyBtn.textContent = '✅';
-      copyBtn.style.background = '#28a745';
-      setTimeout(() => {
-        copyBtn.textContent = originalText;
-        copyBtn.style.background = '';
-      }, 2000);
+      if (copyBtn) {
+        const originalText = copyBtn.textContent;
+        copyBtn.textContent = 'Copied ✓';
+        copyBtn.style.color = 'var(--accent2)';
+        copyBtn.style.borderColor = 'rgba(126,224,193,0.4)';
+        setTimeout(() => {
+          copyBtn.textContent = originalText;
+          copyBtn.style.color = '';
+          copyBtn.style.borderColor = '';
+        }, 2000);
+      }
     } catch (err) {
       console.error('Failed to copy text: ', err);
       const textArea = document.createElement('textarea');
@@ -197,7 +257,6 @@ function AppEnhanced() {
     }
 
     setLoading(true);
-    setError(null);
     setResponse(null);
     setValidationErrors({});
 
@@ -240,6 +299,8 @@ function AppEnhanced() {
           fullResponse: data
         });
       }
+      setResultTime(new Date().toLocaleTimeString());
+      setShowOutput(true);
       setShowModal(true);
     } catch (err) {
       setResponse({
@@ -252,6 +313,7 @@ function AppEnhanced() {
         message: 'Request failed',
         statusCode: 0
       });
+      setResultTime(new Date().toLocaleTimeString());
       setShowModal(true);
     } finally {
       setLoading(false);
@@ -268,112 +330,134 @@ function AppEnhanced() {
       keyAltName: ''
     });
     setResponse(null);
-    setError(null);
     setValidationErrors({});
     setShowModal(false);
   };
 
-  const closeModal = () => {
-    setShowModal(false);
-  };
+  const bothCreds = formData.apiKey.trim() && formData.secretKey.trim();
+  const hasResult = showModal && response;
+  const outputValue = response && response.value ? response.value : '';
+  const maskedOutput = outputValue ? '•'.repeat(Math.min(outputValue.length, 64)) : '';
 
   return (
     <div className="AppEnhanced">
       <div className="main-container">
-        <div className="header">
-          <h1>CryptoVault</h1>
-          <div className="header-description">
-            <p className="main-description">A comprehensive cryptographic operations platform that provides secure hashing, encryption, and decryption operations currently being used in <a href="https://app-engage.shiprocket.in/" target="_blank" rel="noopener noreferrer" className="inline-link">Engage-360</a>.</p>
-            <p className="powered-by">Powered by <a href="https://app.shiprocket.in/" target="_blank" rel="noopener noreferrer"><span className="shiprocket-brand">Shiprocket</span></a></p>
+        {/* ===== Chrome bar ===== */}
+        <div className="chrome-bar">
+          <div className="chrome-left">
+            <span className="chrome-lock"><LockIcon size={16} /></span>
+            <span className="wordmark">CryptoVault</span>
+            <span className="chrome-divider" />
+            <span className="chrome-subtitle">cryptographic operations console</span>
+          </div>
+          <div className="chrome-right">
+            <span className={`cred-pill ${bothCreds ? 'loaded' : ''}`}>
+              <span className="cred-dot" />
+              {bothCreds ? 'keys loaded' : 'no credentials'}
+            </span>
+            <span className="kbd">⌘↵</span>
           </div>
         </div>
 
-        <div className="layout-grid">
-          {/* Credentials Section */}
-          <div className="credentials-section">
-            <div className="credentials-header">
-              <div className="credentials-title">
-                <span className="credentials-icon">🔐</span>
+        {/* ===== Body ===== */}
+        <div className="console-body">
+          <div className="layout-grid">
+            {/* Credentials rail */}
+            <div className="credentials-section">
+              <div className="credentials-header">
+                <LockIcon size={14} />
                 <h3>API Credentials</h3>
-              </div>
-            </div>
-
-            <div className="credentials-content">
-              <div className="form-group">
-                <label htmlFor="apiKey">API Key</label>
-                <input
-                  type="text"
-                  id="apiKey"
-                  name="apiKey"
-                  value={formData.apiKey}
-                  onChange={handleInputChange}
-                  placeholder="Enter your API key"
-                  className={validationErrors.apiKey ? 'error' : ''}
-                />
-                {validationErrors.apiKey && (
-                  <span className="error-message">{validationErrors.apiKey}</span>
-                )}
+                <span className="sealed-badge">SEALED</span>
               </div>
 
-              <div className="form-group">
-                <label htmlFor="secretKey">Secret Key</label>
-                <input
-                  type="password"
-                  id="secretKey"
-                  name="secretKey"
-                  value={formData.secretKey}
-                  onChange={handleInputChange}
-                  placeholder="Enter your secret key"
-                  className={validationErrors.secretKey ? 'error' : ''}
-                />
-                {validationErrors.secretKey && (
-                  <span className="error-message">{validationErrors.secretKey}</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Main Form Section */}
-          <div className="form-section">
-            <form onSubmit={handleSubmit} className="compact-form">
-              <div className="form-group">
-                <label>Operation</label>
-                {isSmallScreen ? (
-                  <select
-                    id="category"
-                    name="category"
-                    value={formData.category}
+              <div className="credentials-content">
+                <div className="form-group">
+                  <label htmlFor="apiKey">API Key</label>
+                  <input
+                    type="text"
+                    id="apiKey"
+                    name="apiKey"
+                    value={formData.apiKey}
                     onChange={handleInputChange}
-                  >
-                    <option value="">Select category</option>
-                    {operationCategories.map((category) => (
-                      <option key={category.name} value={category.name}>{category.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="radio-group">
-                    {operationCategories.map((category) => (
-                      <label key={category.name} className="radio-option">
-                        <input
-                          type="radio"
-                          name="category"
-                          value={category.name}
-                          checked={formData.category === category.name}
-                          onChange={handleInputChange}
-                        />
-                        <span className="radio-label">{category.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-                {validationErrors.category && (
-                  <span className="error-message">{validationErrors.category}</span>
-                )}
-              </div>
+                    placeholder="Enter your API key"
+                    className={validationErrors.apiKey ? 'error' : ''}
+                  />
+                  {validationErrors.apiKey && (
+                    <span className="error-message">{validationErrors.apiKey}</span>
+                  )}
+                </div>
 
-              <div className="form-group">
-                <label htmlFor="operation">Algorithm</label>
-                <div className="input-with-tooltip">
+                <div className="form-group">
+                  <label htmlFor="secretKey">Secret Key</label>
+                  <div className="secret-wrap">
+                    <input
+                      type={showSecret ? 'text' : 'password'}
+                      id="secretKey"
+                      name="secretKey"
+                      value={formData.secretKey}
+                      onChange={handleInputChange}
+                      placeholder="Enter your secret key"
+                      className={validationErrors.secretKey ? 'error' : ''}
+                    />
+                    <button
+                      type="button"
+                      className="eye-btn"
+                      onClick={() => setShowSecret(s => !s)}
+                      title={showSecret ? 'Hide secret key' : 'Reveal secret key'}
+                      aria-label={showSecret ? 'Hide secret key' : 'Reveal secret key'}
+                    >
+                      <EyeIcon open={showSecret} />
+                    </button>
+                  </div>
+                  {validationErrors.secretKey && (
+                    <span className="error-message">{validationErrors.secretKey}</span>
+                  )}
+                </div>
+
+                <p className="cred-note">Keys are sent per-request, never stored.</p>
+              </div>
+            </div>
+
+            {/* Operation builder */}
+            <div className="form-section">
+              <form ref={formRef} onSubmit={handleSubmit} className="compact-form">
+                <div className="form-group">
+                  <label>Operation</label>
+                  {isSmallScreen ? (
+                    <select
+                      id="category"
+                      name="category"
+                      value={formData.category}
+                      onChange={handleInputChange}
+                    >
+                      <option value="">Select category</option>
+                      {operationCategories.map((category) => (
+                        <option key={category.name} value={category.name}>{category.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="radio-group">
+                      {operationCategories.map((category) => (
+                        <label key={category.name} className="radio-option">
+                          <input
+                            type="radio"
+                            name="category"
+                            value={category.name}
+                            checked={formData.category === category.name}
+                            onChange={handleInputChange}
+                          />
+                          <span className="radio-label">{category.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {validationErrors.category && (
+                    <span className="error-message">{validationErrors.category}</span>
+                  )}
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="operation">Algorithm</label>
                   <select
                     id="operation"
                     name="operation"
@@ -382,183 +466,207 @@ function AppEnhanced() {
                     className={validationErrors.operation ? 'error' : ''}
                     disabled={!formData.category}
                   >
-                    <option value="">Select algorithm</option>
+                    <option value="">{formData.category ? 'Select algorithm' : 'Select a category first'}</option>
                     {formData.category && getOperationsForCategory(formData.category).map((op) => (
                       <option key={op.value} value={op.value}>
                         {op.label}
                       </option>
                     ))}
                   </select>
+                  {validationErrors.operation && (
+                    <span className="error-message">{validationErrors.operation}</span>
+                  )}
                   {formData.operation && (
-                    <div className="tooltip-container">
-                      <span className="tooltip-icon" title="Algorithm Description">ℹ️</span>
-                      <div className="tooltip-content">
-                        <div className="tooltip-section">
-                          <strong>Description:</strong>
-                          <p>{getOperationDescription(formData.operation)}</p>
-                        </div>
+                    <div className="algo-info">
+                      <div className="algo-token-row">
+                        <span className="algo-token">{formData.operation}</span>
+                        {deriveTags(getOperationDescription(formData.operation)).map((tag) => (
+                          <span key={tag} className="strength-tag">{tag}</span>
+                        ))}
                       </div>
+                      <p className="algo-desc">{getOperationDescription(formData.operation)}</p>
                     </div>
                   )}
                 </div>
-                {validationErrors.operation && (
-                  <span className="error-message">{validationErrors.operation}</span>
-                )}
-              </div>
 
-              {formData.operation && (
-                <div className="operation-usecase compact">
-                  <p><strong>Use Case:</strong> {getOperationUseCase(formData.operation)}</p>
+                {/* Use case — animated reveal, no layout shift */}
+                <div className={`reveal ${formData.operation ? 'open' : ''}`}>
+                  <div className="reveal-inner">
+                    <div className="reveal-content">
+                      <div className="operation-usecase">
+                        <span className="uc-label">Use case</span>
+                        <span className="uc-text">{getOperationUseCase(formData.operation)}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              )}
 
-
-
-              <div className="form-group">
-                <label htmlFor="value">Value</label>
-                <input
-                  type="text"
-                  id="value"
-                  name="value"
-                  value={formData.value}
-                  onChange={handleInputChange}
-                  placeholder="Enter value to process"
-                  className={validationErrors.value ? 'error' : ''}
-                />
-                {validationErrors.value && (
-                  <span className="error-message">{validationErrors.value}</span>
-                )}
-              </div>
-
-              {shouldShowKeyAltName(formData.operation) && (
                 <div className="form-group">
-                  <label htmlFor="keyAltName">Key Alternative Name</label>
+                  <div className="label-row">
+                    <label htmlFor="value" className="field-label">Value</label>
+                    <span className="char-counter">{formData.value.length}</span>
+                  </div>
                   <input
                     type="text"
-                    id="keyAltName"
-                    name="keyAltName"
-                    value={formData.keyAltName}
+                    id="value"
+                    name="value"
+                    value={formData.value}
                     onChange={handleInputChange}
-                    placeholder="Enter key alternative name"
-                    className={validationErrors.keyAltName ? 'error' : ''}
+                    placeholder="Enter value to process"
+                    className={validationErrors.value ? 'error' : ''}
                   />
-                  {validationErrors.keyAltName && (
-                    <span className="error-message">{validationErrors.keyAltName}</span>
+                  {validationErrors.value && (
+                    <span className="error-message">{validationErrors.value}</span>
                   )}
                 </div>
-              )}
 
-              <div className="button-group">
-                <button type="submit" disabled={loading} className="submit-btn">
-                  {loading ? (
-                    <>
-                      <span className="loading-spinner"></span>
-                      Processing...
-                    </>
-                  ) : (
-                    'Submit'
-                  )}
-                </button>
-                <button type="button" onClick={resetForm} className="reset-btn">
-                  Reset
-                </button>
-              </div>
-            </form>
-
-            {error && (
-              <div className="result error compact">
-                <h3>Error</h3>
-                <p>{error}</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Modal for displaying results */}
-        {showModal && response && (
-          <div className="modal-overlay" onClick={closeModal}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className={`modal-header ${!response.success ? 'error-header' : ''}`}>
-                <h3 className={response.success ? 'success-title' : 'error-title'}>
-                  {response.success ? '✅ Operation Successful' : '❌ Operation Failed'}
-                </h3>
-                <button className="modal-close" onClick={closeModal}>×</button>
-              </div>
-              <div className="modal-body">
-                {response.success ? (
-                  // Success case
-                  response.value ? (
-                    <div className="value-container">
-                      <div className="operation-info">
-                        <label>Operation:</label>
-                        <div className="value-box operation-box">
-                          <span className="value-text operation-text">{response.operation}</span>
-                        </div>
+                {/* Key Alternative Name — animated reveal */}
+                <div className={`reveal ${shouldShowKeyAltName(formData.operation) ? 'open' : ''}`}>
+                  <div className="reveal-inner">
+                    <div className="reveal-content">
+                      <div className="form-group">
+                        <label htmlFor="keyAltName">Key Alternative Name</label>
+                        <input
+                          type="text"
+                          id="keyAltName"
+                          name="keyAltName"
+                          value={formData.keyAltName}
+                          onChange={handleInputChange}
+                          placeholder="Enter key alternative name"
+                          className={validationErrors.keyAltName ? 'error' : ''}
+                        />
+                        {validationErrors.keyAltName && (
+                          <span className="error-message">{validationErrors.keyAltName}</span>
+                        )}
                       </div>
-                      <div className="value-display">
-                        <label>Output Value:</label>
-                        <div className="value-box">
-                          <span className="value-text" id="result-value">{response.value}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="button-group">
+                  <button type="submit" disabled={loading} className="submit-btn">
+                    {loading ? (
+                      <>
+                        <span className="loading-spinner"></span>
+                        Processing…
+                      </>
+                    ) : (
+                      'Run operation'
+                    )}
+                  </button>
+                  <span className="kbd kbd-inline">⌘↵</span>
+                  <button type="button" onClick={resetForm} className="reset-btn">
+                    Reset
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          {/* ===== Output ledger (always mounted) ===== */}
+          <div className="output-region">
+            {hasResult ? (
+              response.success ? (
+                <div className="ledger success">
+                  <div className="ledger-head">
+                    <span className="status-dot" />
+                    <span className="status-label">OK</span>
+                    <span className="ledger-time">{resultTime}</span>
+                    <span className="algo-token">
+                      {response.value ? response.operation : (response.fullResponse?.data?.operation || response.operation)}
+                    </span>
+                    {response.value && (
+                      <span className="byte-badge">{response.value.length} chars</span>
+                    )}
+                  </div>
+                  <div className="ledger-body">
+                    <div className="label-row">
+                      <span className="field-label">Output</span>
+                      {response.value && (
+                        <div className="ledger-actions">
+                          <button
+                            type="button"
+                            className="ghost-btn"
+                            onClick={() => setShowOutput(s => !s)}
+                            title={showOutput ? 'Mask output' : 'Reveal output'}
+                            aria-label={showOutput ? 'Mask output' : 'Reveal output'}
+                          >
+                            <EyeIcon open={showOutput} />
+                          </button>
                           <button
                             className="copy-btn"
                             onClick={() => copyToClipboard(response.value)}
                             title="Copy to clipboard"
                           >
-                            📋
+                            Copy
                           </button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="value-container">
-                      <div className="operation-info">
-                        <label>Operation:</label>
-                        <div className="value-box operation-box">
-                          <span className="value-text operation-text">{response.fullResponse?.data?.operation || response.operation}</span>
-                        </div>
-                      </div>
-                      <div className="value-display">
-                        <label>Output Value:</label>
-                        <div className="value-box">
-                          <span className="value-text" id="result-value">—</span>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                ) : (
-                  // Error case
-                  <div className="error-container">
-                    <div className="error-info">
-                      <div className="error-code">
-                        <span className="modal-error-label">Error Code:</span>
-                        <span className="error-value">{response.error.code}</span>
-                      </div>
-                      <div className="error-title">
-                        <span className="modal-error-label">Error Title:</span>
-                        <span className="error-value">{response.error.title}</span>
-                      </div>
-                      <div className="error-message">
-                        <span className="modal-error-label">Error Message:</span>
-                        <span className="error-value">{response.error.message}</span>
-                      </div>
-                      {response.statusCode && (
-                        <div className="error-status">
-                          <span className="modal-error-label">Status Code:</span>
-                          <span className="error-value">{response.statusCode}</span>
                         </div>
                       )}
                     </div>
+                    {response.value ? (
+                      <div className="value-box" onClick={() => copyToClipboard(response.value)} title="Click to copy">
+                        <span className="value-text">{showOutput ? response.value : maskedOutput}</span>
+                      </div>
+                    ) : (
+                      <div className="value-box" style={{ cursor: 'default' }}>
+                        <span className="value-text">—</span>
+                      </div>
+                    )}
+                    <span className="ledger-hint">Esc to dismiss · click value to copy</span>
                   </div>
-                )}
+                </div>
+              ) : (
+                <div className="ledger error">
+                  <div className="ledger-head">
+                    <span className="status-dot" />
+                    <span className="status-label">ERROR</span>
+                    <span className="ledger-time">{resultTime}</span>
+                  </div>
+                  <div className="ledger-body error-info">
+                    <div className="err-row">
+                      <span className="err-key">Code</span>
+                      <span className="err-val code">{response.error.code}</span>
+                    </div>
+                    <div className="err-row">
+                      <span className="err-key">Title</span>
+                      <span className="err-val">{response.error.title}</span>
+                    </div>
+                    <div className="err-row">
+                      <span className="err-key">Message</span>
+                      <span className="err-val">{response.error.message}</span>
+                    </div>
+                    {response.statusCode ? (
+                      <div className="err-row">
+                        <span className="err-key">Status</span>
+                        <span className="err-val code">{response.statusCode}</span>
+                      </div>
+                    ) : null}
+                    <span className="ledger-hint">Esc to dismiss</span>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="ledger-empty">
+                <LockIcon size={18} />
+                <span className="ledger-empty-text">
+                  Run an operation to see output
+                  <span className="kbd">⌘↵</span>
+                </span>
               </div>
-              <div className={`modal-footer ${!response.success ? 'error-footer' : ''}`}>
-                <button className={`modal-ok-btn ${!response.success ? 'error-btn' : ''}`} onClick={closeModal}>
-                  OK
-                </button>
-              </div>
-            </div>
+            )}
           </div>
-        )}
+        </div>
+
+        {/* ===== Footer ===== */}
+        <div className="console-footer">
+          <p className="main-description">
+            A cryptographic operations platform for secure hashing, encryption and decryption — used in{' '}
+            <a href="https://app-engage.shiprocket.in/" target="_blank" rel="noopener noreferrer" className="inline-link">Engage-360</a>.
+          </p>
+          <p className="powered-by">
+            Powered by <a href="https://app.shiprocket.in/" target="_blank" rel="noopener noreferrer"><span className="shiprocket-brand">Shiprocket</span></a>
+          </p>
+        </div>
       </div>
     </div>
   );
