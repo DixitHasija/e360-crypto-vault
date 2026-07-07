@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './AppEnhanced.css';
 import versionInfo from './version.json';
 
@@ -8,6 +8,14 @@ const LockIcon = ({ size = 16 }) => (
     stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <rect x="5" y="11" width="14" height="10" rx="2" />
     <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </svg>
+);
+
+const ClockIcon = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
   </svg>
 );
 
@@ -30,18 +38,49 @@ const EyeIcon = ({ open }) => (
 );
 
 /* VSCode-style JSON tree: foldable nodes + depth-colored (rainbow) brackets */
-const JsonPrimitive = ({ value }) => {
+const renderHighlighted = (text, search) => {
+  const t = String(text);
+  if (!search) return t;
+  const lower = t.toLowerCase();
+  const q = search.toLowerCase();
+  if (!lower.includes(q)) return t;
+  const parts = [];
+  let i = 0;
+  let idx;
+  while ((idx = lower.indexOf(q, i)) !== -1) {
+    if (idx > i) parts.push(t.slice(i, idx));
+    parts.push(<mark className="json-match" key={idx}>{t.slice(idx, idx + q.length)}</mark>);
+    i = idx + q.length;
+  }
+  parts.push(t.slice(i));
+  return parts;
+};
+
+const JsonPrimitive = ({ value, search }) => {
   if (value === null) return <span className="json-null">null</span>;
   switch (typeof value) {
-    case 'string': return <span className="json-str">"{value}"</span>;
-    case 'number': return <span className="json-num">{String(value)}</span>;
+    case 'string': return <span className="json-str">"{renderHighlighted(value, search)}"</span>;
+    case 'number': return <span className="json-num">{renderHighlighted(String(value), search)}</span>;
     case 'boolean': return <span className="json-bool">{String(value)}</span>;
     default: return <span className="json-str">{String(value)}</span>;
   }
 };
 
-function JsonNode({ keyName, value, depth, isLast }) {
+function JsonNode({ keyName, value, depth, isLast, search, foldSignal }) {
   const [open, setOpen] = useState(true);
+
+  // Fold all / Expand all broadcast from the output toolbar
+  useEffect(() => {
+    if (!foldSignal || !foldSignal.tick) return;
+    if (foldSignal.mode === 'fold') setOpen(depth === 0);
+    else if (foldSignal.mode === 'unfold') setOpen(true);
+  }, [foldSignal, depth]);
+
+  // Auto-expand while searching so matches stay visible
+  useEffect(() => {
+    if (search) setOpen(true);
+  }, [search]);
+
   const isObj = value !== null && typeof value === 'object';
   const indent = { paddingLeft: depth * 18 };
   const bracketClass = `json-bracket d${depth % 3}`;
@@ -51,9 +90,9 @@ function JsonNode({ keyName, value, depth, isLast }) {
       <div className="json-row" style={indent}>
         <span className="json-caret spacer" />
         {keyName !== undefined && (
-          <><span className="json-key">"{keyName}"</span><span className="json-colon">: </span></>
+          <><span className="json-key">"{renderHighlighted(keyName, search)}"</span><span className="json-colon">: </span></>
         )}
-        <JsonPrimitive value={value} />
+        <JsonPrimitive value={value} search={search} />
         {!isLast && <span className="json-comma">,</span>}
       </div>
     );
@@ -76,7 +115,7 @@ function JsonNode({ keyName, value, depth, isLast }) {
           ▸
         </button>
         {keyName !== undefined && (
-          <><span className="json-key">"{keyName}"</span><span className="json-colon">: </span></>
+          <><span className="json-key">"{renderHighlighted(keyName, search)}"</span><span className="json-colon">: </span></>
         )}
         <span className={bracketClass}>{openCh}</span>
         {!open && (
@@ -97,6 +136,8 @@ function JsonNode({ keyName, value, depth, isLast }) {
               value={v}
               depth={depth + 1}
               isLast={i === entries.length - 1}
+              search={search}
+              foldSignal={foldSignal}
             />
           ))}
           <div className="json-row" style={indent}>
@@ -111,13 +152,16 @@ function JsonNode({ keyName, value, depth, isLast }) {
 }
 
 function AppEnhanced() {
-  const [formData, setFormData] = useState({
-    apiKey: '',
-    secretKey: '',
-    category: '',
-    operation: '',
-    value: '',
-    keyAltName: ''
+  const [formData, setFormData] = useState(() => {
+    // Hydrate keys from sessionStorage when "remember for session" was on
+    let apiKey = '', secretKey = '';
+    try {
+      if (sessionStorage.getItem('cv_remember') === '1') {
+        apiKey = sessionStorage.getItem('cv_apiKey') || '';
+        secretKey = sessionStorage.getItem('cv_secretKey') || '';
+      }
+    } catch { /* storage unavailable */ }
+    return { apiKey, secretKey, category: '', operation: '', value: '', keyAltName: '' };
   });
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState(null);
@@ -127,8 +171,30 @@ function AppEnhanced() {
   const [showSecret, setShowSecret] = useState(false);
   const [showFormatted, setShowFormatted] = useState(true);
   const [resultTime, setResultTime] = useState('');
+  const [lastDuration, setLastDuration] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [outputSearch, setOutputSearch] = useState('');
+  const [foldSignal, setFoldSignal] = useState({ tick: 0, mode: null });
+  const [rememberKeys, setRememberKeys] = useState(() => {
+    try { return sessionStorage.getItem('cv_remember') === '1'; } catch { return false; }
+  });
   const formRef = useRef(null);
   const outputRef = useRef(null);
+
+  // Persist/clear credentials for this tab session only (opt-in)
+  useEffect(() => {
+    try {
+      if (rememberKeys) {
+        sessionStorage.setItem('cv_remember', '1');
+        sessionStorage.setItem('cv_apiKey', formData.apiKey);
+        sessionStorage.setItem('cv_secretKey', formData.secretKey);
+      } else {
+        sessionStorage.removeItem('cv_remember');
+        sessionStorage.removeItem('cv_apiKey');
+        sessionStorage.removeItem('cv_secretKey');
+      }
+    } catch { /* storage unavailable */ }
+  }, [rememberKeys, formData.apiKey, formData.secretKey]);
 
   useEffect(() => {
     const updateIsSmallScreen = () => {
@@ -332,13 +398,7 @@ function AppEnhanced() {
     return Object.keys(errors).length === 0;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    if (!validateForm()) {
-      return;
-    }
-
+  const runOperation = async () => {
     setLoading(true);
     setResponse(null);
     setValidationErrors({});
@@ -348,6 +408,8 @@ function AppEnhanced() {
       outputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
+    const startedAt = performance.now();
+    let resp;
     try {
       const apiBase = process.env.NODE_ENV === 'development'
         ? 'http://localhost:3001'
@@ -369,29 +431,26 @@ function AppEnhanced() {
       const data = await apiResponse.json();
 
       if (data.status === 'SUCCESS' && data.data && data.data.value) {
-        setResponse({
+        resp = {
           success: true,
           value: data.data.value,
           operation: data.data.operation
-        });
+        };
       } else if (data.status === 'ERROR') {
-        setResponse({
+        resp = {
           success: false,
           error: data.error,
           message: data.message,
           statusCode: data.statusCode
-        });
+        };
       } else {
-        setResponse({
+        resp = {
           success: true,
           fullResponse: data
-        });
+        };
       }
-      setResultTime(new Date().toLocaleTimeString());
-      setShowFormatted(true);
-      setShowModal(true);
     } catch (err) {
-      setResponse({
+      resp = {
         success: false,
         error: {
           code: 'NETWORK_ERROR',
@@ -400,12 +459,34 @@ function AppEnhanced() {
         },
         message: 'Request failed',
         statusCode: 0
-      });
-      setResultTime(new Date().toLocaleTimeString());
-      setShowModal(true);
-    } finally {
-      setLoading(false);
+      };
     }
+
+    const durationMs = Math.round(performance.now() - startedAt);
+    const timeLabel = new Date().toLocaleTimeString();
+    setResponse(resp);
+    setResultTime(timeLabel);
+    setLastDuration(durationMs);
+    setShowFormatted(true);
+    setOutputSearch('');
+    setShowModal(true);
+    setHistory(prev => [{
+      id: `${Date.now()}-${prev.length}`,
+      timeLabel,
+      durationMs,
+      category: formData.category,
+      operation: formData.operation,
+      value: formData.value,
+      keyAltName: formData.keyAltName,
+      response: resp
+    }, ...prev].slice(0, 20));
+    setLoading(false);
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+    runOperation();
   };
 
   const resetForm = () => {
@@ -422,6 +503,54 @@ function AppEnhanced() {
     setShowModal(false);
   };
 
+  // Encryption ↔ Decryption counterpart for output chaining
+  const getInverseOperation = (op) => {
+    if (!op) return null;
+    if (op.includes('_ENCRYPTION')) {
+      return { category: 'Decryption', operation: op.replace('_ENCRYPTION', '_DECRYPTION') };
+    }
+    if (op.includes('_DECRYPTION')) {
+      return { category: 'Encryption', operation: op.replace('_DECRYPTION', '_ENCRYPTION') };
+    }
+    return null;
+  };
+
+  // Feed the current output back into the form as the next input
+  const chainOutput = () => {
+    if (!response || !response.value) return;
+    const inverse = getInverseOperation(response.operation || formData.operation);
+    setFormData(prev => ({
+      ...prev,
+      value: response.value,
+      ...(inverse ? { category: inverse.category, operation: inverse.operation } : {})
+    }));
+    setShowModal(false);
+    requestAnimationFrame(() => {
+      document.getElementById('value')?.focus();
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  // Restore a past run: form inputs + its result in the ledger
+  const restoreRun = (h) => {
+    setFormData(prev => ({
+      ...prev,
+      category: h.category,
+      operation: h.operation,
+      value: h.value,
+      keyAltName: h.keyAltName || ''
+    }));
+    setResponse(h.response);
+    setResultTime(h.timeLabel);
+    setLastDuration(h.durationMs);
+    setShowFormatted(true);
+    setOutputSearch('');
+    setShowModal(true);
+    requestAnimationFrame(() => {
+      outputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
   const buildStamp = (() => {
     try { return new Date(versionInfo.buildTime).toLocaleString(); } catch { return versionInfo.buildTime; }
   })();
@@ -430,14 +559,35 @@ function AppEnhanced() {
   const bothCreds = formData.apiKey.trim() && formData.secretKey.trim();
   const hasResult = showModal && response;
   const outputValue = response && response.value ? response.value : '';
-  const parsedOutput = (() => {
+  const parsedOutput = useMemo(() => {
     if (!outputValue) return undefined;
     try { return JSON.parse(outputValue); } catch { return undefined; }
-  })();
+  }, [outputValue]);
   // Only objects/arrays benefit from tree formatting
   const canFormat = parsedOutput !== undefined && typeof parsedOutput === 'object' && parsedOutput !== null;
   const formattedOutput = canFormat ? JSON.stringify(parsedOutput, null, 2) : null;
   const displayValue = showFormatted && canFormat ? formattedOutput : outputValue;
+
+  // Live match count for the output search
+  const matchCount = useMemo(() => {
+    const q = outputSearch.trim().toLowerCase();
+    if (!q || !canFormat) return 0;
+    let count = 0;
+    const walk = (node) => {
+      if (node === null || node === undefined) return;
+      if (typeof node === 'object') {
+        const entries = Array.isArray(node) ? node.map(v => [null, v]) : Object.entries(node);
+        for (const [k, v] of entries) {
+          if (k && k.toLowerCase().includes(q)) count++;
+          walk(v);
+        }
+      } else if (typeof node !== 'boolean' && String(node).toLowerCase().includes(q)) {
+        count++;
+      }
+    };
+    walk(parsedOutput);
+    return count;
+  }, [outputSearch, canFormat, parsedOutput]);
 
   return (
     <div className="AppEnhanced">
@@ -463,7 +613,8 @@ function AppEnhanced() {
         {/* ===== Body ===== */}
         <div className="console-body">
           <div className="layout-grid">
-            {/* Credentials rail */}
+            {/* Left rail: credentials + run history */}
+            <div className="rail">
             <div className="credentials-section">
               <div className="credentials-header">
                 <LockIcon size={14} />
@@ -515,8 +666,51 @@ function AppEnhanced() {
                   )}
                 </div>
 
-                <p className="cred-note">Keys are sent per-request, never stored.</p>
+                <label className="remember-row" title="Keys live in sessionStorage and clear when this tab closes">
+                  <input
+                    type="checkbox"
+                    checked={rememberKeys}
+                    onChange={(e) => setRememberKeys(e.target.checked)}
+                  />
+                  <span className="switch" aria-hidden="true" />
+                  <span className="remember-text">Remember keys for this session</span>
+                </label>
+                <p className="cred-note">{rememberKeys ? 'Keys stay in this tab only — cleared when it closes.' : 'Keys are sent per-request, never stored.'}</p>
               </div>
+            </div>
+
+            {/* Run history */}
+            <div className="history-section">
+              <div className="history-header">
+                <ClockIcon />
+                <h3>History</h3>
+                {history.length > 0 && (
+                  <button type="button" className="history-clear" onClick={() => setHistory([])} title="Clear history">
+                    Clear
+                  </button>
+                )}
+              </div>
+              {history.length === 0 ? (
+                <p className="history-empty">No runs yet — results will appear here.</p>
+              ) : (
+                <ul className="history-list">
+                  {history.map((h) => (
+                    <li key={h.id}>
+                      <button
+                        type="button"
+                        className="history-item"
+                        onClick={() => restoreRun(h)}
+                        title={`${h.operation} · ${h.timeLabel} · ${h.durationMs}ms`}
+                      >
+                        <span className={`history-dot ${h.response.success ? 'ok' : 'err'}`} />
+                        <span className="history-op">{h.operation}</span>
+                        <span className="history-time">{h.timeLabel}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             </div>
 
             {/* Operation builder */}
@@ -665,14 +859,28 @@ function AppEnhanced() {
           </div>
 
           {/* ===== Output ledger (always mounted) ===== */}
-          <div className="output-region" ref={outputRef}>
-            {hasResult ? (
+          <div className="output-region" ref={outputRef} aria-live="polite">
+            {loading ? (
+              <div className="ledger running">
+                <div className="ledger-head">
+                  <span className="status-dot" />
+                  <span className="status-label">RUNNING</span>
+                  {formData.operation && <span className="algo-token">{formData.operation}</span>}
+                </div>
+                <div className="ledger-body">
+                  <span className="skel" style={{ width: '82%' }} />
+                  <span className="skel" style={{ width: '58%' }} />
+                  <span className="skel" style={{ width: '71%' }} />
+                </div>
+              </div>
+            ) : hasResult ? (
               response.success ? (
                 <div className="ledger success">
                   <div className="ledger-head">
                     <span className="status-dot" />
                     <span className="status-label">OK</span>
                     <span className="ledger-time">{resultTime}</span>
+                    {lastDuration != null && <span className="duration-badge">{lastDuration} ms</span>}
                     <span className="algo-token">
                       {response.value ? response.operation : (response.fullResponse?.data?.operation || response.operation)}
                     </span>
@@ -685,6 +893,14 @@ function AppEnhanced() {
                       <span className="field-label">Output</span>
                       {response.value && (
                         <div className="ledger-actions">
+                          <button
+                            type="button"
+                            className="ghost-btn text"
+                            onClick={chainOutput}
+                            title="Use this output as the next input (auto-flips encrypt/decrypt)"
+                          >
+                            Use as input
+                          </button>
                           {canFormat && (
                             <button
                               type="button"
@@ -705,12 +921,34 @@ function AppEnhanced() {
                         </div>
                       )}
                     </div>
+                    {response.value && canFormat && showFormatted && (
+                      <div className="output-controls">
+                        <input
+                          type="text"
+                          className="json-search"
+                          placeholder="Search keys & values…"
+                          value={outputSearch}
+                          onChange={(e) => setOutputSearch(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOutputSearch(''); } }}
+                        />
+                        {outputSearch.trim() && (
+                          <span className="match-count">{matchCount} match{matchCount === 1 ? '' : 'es'}</span>
+                        )}
+                        <span className="controls-spacer" />
+                        <button type="button" className="ghost-btn text" onClick={() => setFoldSignal(s => ({ tick: s.tick + 1, mode: 'fold' }))}>
+                          Fold all
+                        </button>
+                        <button type="button" className="ghost-btn text" onClick={() => setFoldSignal(s => ({ tick: s.tick + 1, mode: 'unfold' }))}>
+                          Expand all
+                        </button>
+                      </div>
+                    )}
                     {response.value ? (
                       <div className="value-box">
                         <div className="value-scroll">
                           {showFormatted && canFormat ? (
                             <div className="json-tree">
-                              <JsonNode value={parsedOutput} depth={0} isLast={true} />
+                              <JsonNode value={parsedOutput} depth={0} isLast={true} search={outputSearch.trim()} foldSignal={foldSignal} />
                             </div>
                           ) : (
                             <span className="value-text">{displayValue}</span>
@@ -733,6 +971,10 @@ function AppEnhanced() {
                     <span className="status-dot" />
                     <span className="status-label">ERROR</span>
                     <span className="ledger-time">{resultTime}</span>
+                    {lastDuration != null && <span className="duration-badge">{lastDuration} ms</span>}
+                    <button type="button" className="ghost-btn text retry-btn" onClick={() => { if (validateForm()) runOperation(); }} title="Run the same request again">
+                      Retry
+                    </button>
                   </div>
                   <div className="ledger-body error-info">
                     <div className="err-row">
