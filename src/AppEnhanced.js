@@ -102,6 +102,17 @@ const renderHighlighted = (text, search) => {
   return parts;
 };
 
+// Does this key/value (or any descendant) match the search term?
+const nodeMatches = (key, value, q) => {
+  if (key !== null && key !== undefined && String(key).toLowerCase().includes(q)) return true;
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'object') {
+    const entries = Array.isArray(value) ? value.map(v => [null, v]) : Object.entries(value);
+    return entries.some(([k, v]) => nodeMatches(k, v, q));
+  }
+  return String(value).toLowerCase().includes(q);
+};
+
 const JsonPrimitive = ({ value, search }) => {
   if (value === null) return <span className="json-null">null</span>;
   switch (typeof value) {
@@ -112,7 +123,7 @@ const JsonPrimitive = ({ value, search }) => {
   }
 };
 
-function JsonNode({ keyName, value, depth, isLast, search, foldSignal }) {
+function JsonNode({ keyName, value, depth, isLast, search, foldSignal, filter }) {
   const [open, setOpen] = useState(true);
 
   // Fold all / Expand all broadcast from the output toolbar
@@ -145,7 +156,14 @@ function JsonNode({ keyName, value, depth, isLast, search, foldSignal }) {
   }
 
   const isArr = Array.isArray(value);
-  const entries = isArr ? value.map((v, i) => [i, v]) : Object.entries(value);
+  const allEntries = isArr ? value.map((v, i) => [i, v]) : Object.entries(value);
+  // Filter mode: keep only subtrees that contain a match.
+  // If this node's own key matches, show its whole subtree for context.
+  const q = search ? search.toLowerCase() : '';
+  const keySelfMatch = q && keyName !== undefined && String(keyName).toLowerCase().includes(q);
+  const entries = (filter && q && !keySelfMatch)
+    ? allEntries.filter(([k, v]) => nodeMatches(isArr ? null : k, v, q))
+    : allEntries;
   const openCh = isArr ? '[' : '{';
   const closeCh = isArr ? ']' : '}';
 
@@ -184,6 +202,7 @@ function JsonNode({ keyName, value, depth, isLast, search, foldSignal }) {
               isLast={i === entries.length - 1}
               search={search}
               foldSignal={foldSignal}
+              filter={filter}
             />
           ))}
           <div className="json-row" style={indent}>
@@ -220,6 +239,7 @@ function AppEnhanced() {
   const [lastDuration, setLastDuration] = useState(null);
   const [history, setHistory] = useState([]);
   const [outputSearch, setOutputSearch] = useState('');
+  const [filterMode, setFilterMode] = useState(true);
   const [foldSignal, setFoldSignal] = useState({ tick: 0, mode: null });
   const [csvFile, setCsvFile] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null);
@@ -750,9 +770,13 @@ function AppEnhanced() {
   };
 
   const buildStamp = (() => {
-    try { return new Date(versionInfo.buildTime).toLocaleString(); } catch { return versionInfo.buildTime; }
+    try {
+      return new Date(versionInfo.buildTime).toLocaleString(undefined, {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+      });
+    } catch { return versionInfo.buildTime; }
   })();
-  const buildTitle = `Build ${versionInfo.commit} · ${buildStamp}`;
+  const buildTitle = `Build ${versionInfo.commit} · ${new Date(versionInfo.buildTime).toLocaleString()}`;
 
   const bothCreds = formData.apiKey.trim() && formData.secretKey.trim();
   const hasResult = showModal && response;
@@ -856,7 +880,9 @@ function AppEnhanced() {
                       title={showSecret ? 'Hide secret key' : 'Reveal secret key'}
                       aria-label={showSecret ? 'Hide secret key' : 'Reveal secret key'}
                     >
-                      <EyeIcon open={showSecret} />
+                      <span key={showSecret ? 'open' : 'closed'} className="eye-swap">
+                        <EyeIcon open={showSecret} />
+                      </span>
                     </button>
                   </div>
                   {validationErrors.secretKey && (
@@ -1198,14 +1224,27 @@ function AppEnhanced() {
                     </div>
                     {response.value && canFormat && showFormatted && (
                       <div className="output-controls">
+                        <label htmlFor="jsonSearch" className="search-label">Search</label>
                         <input
                           type="text"
+                          id="jsonSearch"
+                          name="jsonSearch"
                           className="json-search"
                           placeholder="Search keys & values…"
+                          aria-label="Search output JSON"
                           value={outputSearch}
                           onChange={(e) => setOutputSearch(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOutputSearch(''); } }}
                         />
+                        <label className="filter-toggle" title="Show only the keys that match the search">
+                          <input
+                            type="checkbox"
+                            checked={filterMode}
+                            onChange={(e) => setFilterMode(e.target.checked)}
+                          />
+                          <span className="switch" aria-hidden="true" />
+                          <span className="filter-text">Only matches</span>
+                        </label>
                         {outputSearch.trim() && (
                           <span className="match-count">{matchCount} match{matchCount === 1 ? '' : 'es'}</span>
                         )}
@@ -1222,9 +1261,20 @@ function AppEnhanced() {
                       <div className="value-box">
                         <div className="value-scroll">
                           {showFormatted && canFormat ? (
-                            <div className="json-tree">
-                              <JsonNode value={parsedOutput} depth={0} isLast={true} search={outputSearch.trim()} foldSignal={foldSignal} />
-                            </div>
+                            outputSearch.trim() && filterMode && matchCount === 0 ? (
+                              <span className="no-matches">No matches for “{outputSearch.trim()}”</span>
+                            ) : (
+                              <div className="json-tree">
+                                <JsonNode
+                                  value={parsedOutput}
+                                  depth={0}
+                                  isLast={true}
+                                  search={outputSearch.trim()}
+                                  foldSignal={foldSignal}
+                                  filter={filterMode}
+                                />
+                              </div>
+                            )
                           ) : (
                             <span className="value-text">{displayValue}</span>
                           )}
@@ -1294,7 +1344,7 @@ function AppEnhanced() {
           </p>
           <div className="footer-right">
             <span className="build-tag" title={buildTitle}>
-              <span className="build-dot" /> {versionInfo.version} · #{versionInfo.commit}
+              <span className="build-dot" /> {versionInfo.version} · #{versionInfo.commit} · {buildStamp}
             </span>
             <p className="powered-by">
               Powered by <a href="https://app.shiprocket.in/" target="_blank" rel="noopener noreferrer"><span className="shiprocket-brand">Shiprocket</span></a>

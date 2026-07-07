@@ -261,7 +261,23 @@
 }
 
 .secret-wrap { position: relative; display: flex; align-items: center; }
-.secret-wrap input { padding-right: 40px; }
+/* higher specificity than the later `.form-group input { padding: 0 12px }`
+   shorthand, which was resetting padding-right and letting text slide
+   under the eye button */
+.form-group .secret-wrap input { padding-right: 44px; }
+
+/* soft fade so long values melt away before the eye, never collide */
+.secret-wrap::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  right: 36px;
+  width: 18px;
+  border-radius: 0 var(--r-input) var(--r-input) 0;
+  background: linear-gradient(90deg, transparent, var(--surface-elevated));
+  pointer-events: none;
+}
 
 .eye-btn {
   position: absolute;
@@ -271,14 +287,36 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  border-radius: 6px;
-  transition: color var(--t-hover) var(--ease-out), background var(--t-hover) var(--ease-out);
+  border-radius: 7px;
+  transition: color var(--t-hover) var(--ease-out), background var(--t-hover) var(--ease-out),
+    border-color var(--t-hover) var(--ease-out), box-shadow var(--t-hover) var(--ease-out),
+    transform var(--t-press) var(--ease-out);
 }
-.eye-btn:hover { color: var(--text-hi); background: rgba(255, 255, 255, 0.04); }
+.eye-btn:hover {
+  color: var(--accent);
+  background: rgba(240, 180, 41, 0.08);
+  border-color: rgba(240, 180, 41, 0.3);
+  box-shadow: 0 0 14px rgba(240, 180, 41, 0.14);
+}
+.eye-btn:active { transform: scale(0.88); }
+.eye-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* icon morph — springs in on every reveal/hide toggle */
+.eye-swap {
+  display: inline-flex;
+  animation: eyePop 240ms var(--ease-spring);
+}
+@keyframes eyePop {
+  from { opacity: 0; transform: scale(0.55) rotate(-10deg); }
+  to { opacity: 1; transform: none; }
+}
 
 /* ===== Operation builder ===== */
 .form-section { min-width: 0; }
@@ -1119,6 +1157,55 @@ input[name="secretKey"] { font-family: var(--font-mono); }
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.search-label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-mid);
+  flex-shrink: 0;
+}
+
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+.filter-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.filter-toggle input:checked + .switch {
+  background: rgba(240, 180, 41, 0.15);
+  border-color: rgba(240, 180, 41, 0.4);
+}
+.filter-toggle input:checked + .switch::after {
+  transform: translateX(12px);
+  background: var(--accent);
+}
+.filter-toggle input:focus-visible + .switch {
+  box-shadow: var(--focus-ring);
+}
+.filter-text {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-mid);
+  white-space: nowrap;
+}
+
+.no-matches {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
 }
 
 .json-search {
