@@ -686,15 +686,16 @@ function AppEnhanced() {
     }
   };
 
+  // Reset clears only the operation inputs — credentials stay put
   const resetForm = () => {
-    setFormData({
-      apiKey: '',
-      secretKey: '',
+    setFormData(prev => ({
+      ...prev,
       category: '',
       operation: '',
       value: '',
       keyAltName: ''
-    });
+    }));
+    setCsvFile(null);
     setResponse(null);
     setValidationErrors({});
     setShowModal(false);

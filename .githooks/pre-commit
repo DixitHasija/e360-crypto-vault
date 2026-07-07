@@ -1,0 +1,34 @@
+#!/bin/sh
+# Ask for a version bump on every commit (interactive terminals only).
+# Silently skips in non-interactive contexts (CI, GUI commits, scripts).
+
+# Opt-out for a single commit: SKIP_VERSION_PROMPT=1 git commit ...
+[ -n "$SKIP_VERSION_PROMPT" ] && exit 0
+
+# If this commit already changes the version line (e.g. npm version), don't ask again
+if git diff --cached -- package.json | grep -q '^[+-].*"version"'; then
+  exit 0
+fi
+
+# Need a real terminal to prompt; otherwise skip silently
+if ! sh -c ': < /dev/tty' 2>/dev/null; then
+  exit 0
+fi
+
+current=$(node -p "require('./package.json').version" 2>/dev/null || echo "?")
+printf "Version bump? current v%s — [p]atch / [m]inor / [M]ajor / [Enter = no bump]: " "$current" > /dev/tty
+read ans < /dev/tty || exit 0
+
+case "$ans" in
+  p|P|patch) type=patch ;;
+  m|minor)   type=minor ;;
+  M|major)   type=major ;;
+  *) exit 0 ;;
+esac
+
+npm version "$type" --no-git-tag-version > /dev/null 2>&1
+node scripts/gen-version.js > /dev/null 2>&1 || true
+git add package.json package-lock.json 2>/dev/null
+newv=$(node -p "require('./package.json').version")
+printf "  \342\206\222 bumped to v%s (included in this commit)\n" "$newv" > /dev/tty
+exit 0
