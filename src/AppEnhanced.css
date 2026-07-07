@@ -1157,6 +1157,190 @@ mark.json-match {
   padding: 0 1px;
 }
 
+/* ===== CSV upload ===== */
+.label-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-chip);
+  background: var(--surface-elevated);
+  color: var(--text-mid);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--t-hover) var(--ease-out), border-color var(--t-hover) var(--ease-out);
+}
+.upload-btn:hover { color: var(--accent); border-color: rgba(240, 180, 41, 0.4); }
+.upload-btn input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.csv-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  background: rgba(240, 180, 41, 0.06);
+  border: 1px solid rgba(240, 180, 41, 0.25);
+  border-radius: var(--r-input);
+}
+.csv-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-hi);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.csv-count {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.csv-remove {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color var(--t-hover) var(--ease-out);
+}
+.csv-remove:hover { color: var(--danger); }
+
+/* ===== Batch progress ===== */
+.progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), #f5c14a);
+  transition: width 200ms var(--ease-out);
+}
+.progress-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-mid);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Batch results table ===== */
+.batch-table {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+}
+
+.batch-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 22px 20px minmax(0, 1.4fr) 22px;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.batch-row:last-child { border-bottom: none; }
+.batch-row:hover { background: rgba(255, 255, 255, 0.02); }
+
+.batch-idx {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.batch-in {
+  color: var(--text-mid);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-arrow { color: var(--text-dim); text-align: center; }
+.batch-out {
+  color: var(--accent2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-row.fail .batch-out { color: var(--danger); }
+
+/* Per-row copy buttons — revealed on row hover, professional & quiet */
+.row-copy,
+.row-copy-slot {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.row-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out),
+    border-color var(--t-hover) var(--ease-out), background var(--t-hover) var(--ease-out);
+}
+.batch-row:hover .row-copy,
+.row-copy:focus-visible { opacity: 1; }
+.row-copy:hover {
+  color: var(--accent);
+  border-color: rgba(240, 180, 41, 0.35);
+  background: rgba(240, 180, 41, 0.08);
+}
+.row-copy:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.row-copy.copied {
+  opacity: 1;
+  color: var(--accent2);
+  border-color: rgba(126, 224, 193, 0.35);
+  background: rgba(126, 224, 193, 0.08);
+}
+
+/* ===== Partial batch state ===== */
+.ledger.partial {
+  border-left: 3px solid var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(240, 180, 41, 0.14);
+}
+.ledger.partial .status-dot { background: var(--accent); }
+.ledger.partial .status-label { color: var(--accent); }
+
 /* ===== Reduced motion ===== */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -11,6 +11,52 @@ const LockIcon = ({ size = 16 }) => (
   </svg>
 );
 
+const CopyIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 6 9 17l-5-5" />
+  </svg>
+);
+
+/* Per-row copy button with inline "copied" feedback */
+function RowCopyBtn({ text, label }) {
+  const [copied, setCopied] = useState(false);
+  const doCopy = async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
+  return (
+    <button
+      type="button"
+      className={`row-copy ${copied ? 'copied' : ''}`}
+      onClick={doCopy}
+      title={copied ? 'Copied!' : label}
+      aria-label={label}
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+    </button>
+  );
+}
+
 const ClockIcon = ({ size = 14 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -175,6 +221,8 @@ function AppEnhanced() {
   const [history, setHistory] = useState([]);
   const [outputSearch, setOutputSearch] = useState('');
   const [foldSignal, setFoldSignal] = useState({ tick: 0, mode: null });
+  const [csvFile, setCsvFile] = useState(null);
+  const [batchProgress, setBatchProgress] = useState(null);
   const [rememberKeys, setRememberKeys] = useState(() => {
     try { return sessionStorage.getItem('cv_remember') === '1'; } catch { return false; }
   });
@@ -389,7 +437,8 @@ function AppEnhanced() {
     if (!formData.secretKey.trim()) errors.secretKey = 'Secret Key is required';
     if (!formData.category) errors.category = 'Operation is required';
     if (!formData.operation) errors.operation = 'Algorithm is required';
-    if (!formData.value.trim()) errors.value = 'Value is required';
+    if (!csvFile && !formData.value.trim()) errors.value = 'Value is required';
+    if (csvFile && csvFile.values.length === 0) errors.value = 'CSV has no values — first column is empty';
     if (shouldShowKeyAltName(formData.operation) && !formData.keyAltName.trim()) {
       errors.keyAltName = 'Key Alternative Name is required';
     }
@@ -483,10 +532,158 @@ function AppEnhanced() {
     setLoading(false);
   };
 
+  /* ===== CSV batch processing ===== */
+
+  // Basic CSV: first column of each non-empty row (handles quoted cells)
+  const parseCsvValues = (text) => {
+    const values = [];
+    const lines = String(text).split(/\r\n|\n|\r/);
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let cell;
+      if (line.startsWith('"')) {
+        let i = 1, out = '';
+        while (i < line.length) {
+          if (line[i] === '"') {
+            if (line[i + 1] === '"') { out += '"'; i += 2; } else break;
+          } else { out += line[i]; i++; }
+        }
+        cell = out;
+      } else {
+        cell = line.split(',')[0];
+      }
+      cell = cell.trim();
+      if (cell) values.push(cell);
+    }
+    return values;
+  };
+
+  const handleCsvUpload = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const values = parseCsvValues(reader.result || '');
+      setCsvFile({ name: file.name, values });
+      setValidationErrors(prev => ({ ...prev, value: undefined }));
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const csvEscape = (s) => {
+    const t = String(s ?? '');
+    return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+
+  const buildResultCsv = (rows) =>
+    ['value,processed_value,status']
+      .concat(rows.map(r => [csvEscape(r.input), csvEscape(r.ok ? r.output : (r.err || 'error')), r.ok ? 'ok' : 'failed'].join(',')))
+      .join('\n');
+
+  const downloadBatchCsv = () => {
+    if (!response || !response.batch) return;
+    const blob = new Blob([buildResultCsv(response.rows)], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cryptovault_${(response.operation || 'batch').toLowerCase()}_results.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const runBatch = async () => {
+    const values = csvFile.values;
+    setLoading(true);
+    setResponse(null);
+    setValidationErrors({});
+    setBatchProgress({ done: 0, total: values.length });
+
+    requestAnimationFrame(() => {
+      outputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    const startedAt = performance.now();
+    const apiBase = process.env.NODE_ENV === 'development'
+      ? 'http://localhost:3001'
+      : '';
+    const results = new Array(values.length);
+    let done = 0;
+
+    const processOne = async (idx) => {
+      const input = values[idx];
+      try {
+        const r = await fetch(`${apiBase}/api/encryption/perform-op`, {
+          method: 'POST',
+          headers: {
+            'E360-CRYPTO-X-API-KEY': formData.apiKey.trim(),
+            'E360-CRYPTO-X-SECRET-KEY': formData.secretKey.trim(),
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            operation: formData.operation.trim(),
+            value: input,
+            ...(shouldShowKeyAltName(formData.operation) && { key_alt_name: formData.keyAltName.trim() })
+          })
+        });
+        const data = await r.json();
+        if (data.status === 'SUCCESS' && data.data && data.data.value) {
+          results[idx] = { input, output: data.data.value, ok: true };
+        } else {
+          const err = (data.error && (data.error.message || data.error.code)) || data.message || 'Failed';
+          results[idx] = { input, output: '', ok: false, err };
+        }
+      } catch (e) {
+        results[idx] = { input, output: '', ok: false, err: e.message || 'Network error' };
+      }
+      done++;
+      setBatchProgress({ done, total: values.length });
+    };
+
+    // Limited concurrency so we don't hammer the API
+    const queue = values.map((_, i) => i);
+    const worker = async () => { while (queue.length) { await processOne(queue.shift()); } };
+    await Promise.all(Array.from({ length: Math.min(4, values.length) }, worker));
+
+    const okCount = results.filter(r => r.ok).length;
+    const durationMs = Math.round(performance.now() - startedAt);
+    const timeLabel = new Date().toLocaleTimeString();
+    const resp = {
+      success: okCount > 0,
+      batch: true,
+      rows: results,
+      okCount,
+      failCount: values.length - okCount,
+      operation: formData.operation
+    };
+    setResponse(resp);
+    setResultTime(timeLabel);
+    setLastDuration(durationMs);
+    setBatchProgress(null);
+    setShowModal(true);
+    setHistory(prev => [{
+      id: `${Date.now()}-${prev.length}`,
+      timeLabel,
+      durationMs,
+      category: formData.category,
+      operation: formData.operation,
+      value: '',
+      keyAltName: formData.keyAltName,
+      response: resp
+    }, ...prev].slice(0, 20));
+    setLoading(false);
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!validateForm()) return;
-    runOperation();
+    if (csvFile && csvFile.values.length > 0) {
+      runBatch();
+    } else {
+      runOperation();
+    }
   };
 
   const resetForm = () => {
@@ -799,15 +996,29 @@ function AppEnhanced() {
                 <div className="form-group">
                   <div className="label-row">
                     <label htmlFor="value" className="field-label">Value</label>
-                    <span className="char-counter">{formData.value.length}</span>
+                    <span className="label-actions">
+                      {!csvFile && <span className="char-counter">{formData.value.length}</span>}
+                      <label className="upload-btn" title="Upload a CSV — every value in the first column gets processed in batch">
+                        <input type="file" accept=".csv,text/csv,text/plain" onChange={handleCsvUpload} />
+                        Upload CSV
+                      </label>
+                    </span>
                   </div>
+                  {csvFile && (
+                    <div className="csv-chip">
+                      <span className="csv-name" title={csvFile.name}>{csvFile.name}</span>
+                      <span className="csv-count">{csvFile.values.length} values</span>
+                      <button type="button" className="csv-remove" onClick={() => setCsvFile(null)} title="Remove CSV">×</button>
+                    </div>
+                  )}
                   <input
                     type="text"
                     id="value"
                     name="value"
                     value={formData.value}
                     onChange={handleInputChange}
-                    placeholder="Enter value to process"
+                    placeholder={csvFile ? 'Using values from CSV' : 'Enter value to process'}
+                    disabled={!!csvFile}
                     className={validationErrors.value ? 'error' : ''}
                   />
                   {validationErrors.value && (
@@ -868,13 +1079,76 @@ function AppEnhanced() {
                   {formData.operation && <span className="algo-token">{formData.operation}</span>}
                 </div>
                 <div className="ledger-body">
-                  <span className="skel" style={{ width: '82%' }} />
-                  <span className="skel" style={{ width: '58%' }} />
-                  <span className="skel" style={{ width: '71%' }} />
+                  {batchProgress ? (
+                    <>
+                      <div className="progress-track">
+                        <div
+                          className="progress-fill"
+                          style={{ width: `${batchProgress.total ? Math.round((batchProgress.done / batchProgress.total) * 100) : 0}%` }}
+                        />
+                      </div>
+                      <span className="progress-text">{batchProgress.done}/{batchProgress.total} processed</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="skel" style={{ width: '82%' }} />
+                      <span className="skel" style={{ width: '58%' }} />
+                      <span className="skel" style={{ width: '71%' }} />
+                    </>
+                  )}
                 </div>
               </div>
             ) : hasResult ? (
-              response.success ? (
+              response.batch ? (
+                <div className={`ledger batch ${response.failCount === 0 ? 'success' : response.okCount === 0 ? 'error' : 'partial'}`}>
+                  <div className="ledger-head">
+                    <span className="status-dot" />
+                    <span className="status-label">
+                      {response.failCount === 0 ? 'OK' : response.okCount === 0 ? 'ERROR' : 'PARTIAL'}
+                    </span>
+                    <span className="ledger-time">{resultTime}</span>
+                    {lastDuration != null && <span className="duration-badge">{lastDuration} ms</span>}
+                    <span className="algo-token">{response.operation}</span>
+                    <span className="byte-badge">
+                      {response.rows.length} rows · {response.okCount} ok · {response.failCount} failed
+                    </span>
+                  </div>
+                  <div className="ledger-body">
+                    <div className="label-row">
+                      <span className="field-label">Results</span>
+                      <div className="ledger-actions">
+                        <button
+                          type="button"
+                          className="ghost-btn text"
+                          onClick={downloadBatchCsv}
+                          title="Download CSV with value → processed_value mapping"
+                        >
+                          Download CSV
+                        </button>
+                      </div>
+                    </div>
+                    <div className="batch-table">
+                      {response.rows.map((r, i) => (
+                        <div key={i} className={`batch-row ${r.ok ? '' : 'fail'}`}>
+                          <span className="batch-idx">{i + 1}</span>
+                          <span className="batch-in" title={r.input}>{r.input}</span>
+                          <RowCopyBtn text={r.input} label="Copy value" />
+                          <span className="batch-arrow">→</span>
+                          <span className="batch-out" title={r.ok ? r.output : r.err}>
+                            {r.ok ? r.output : (r.err || 'failed')}
+                          </span>
+                          {r.ok ? (
+                            <RowCopyBtn text={r.output} label="Copy processed value" />
+                          ) : (
+                            <span className="row-copy-slot" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <span className="ledger-hint">Esc to dismiss · Download CSV saves the value → processed mapping</span>
+                  </div>
+                </div>
+              ) : response.success ? (
                 <div className="ledger success">
                   <div className="ledger-head">
                     <span className="status-dot" />
