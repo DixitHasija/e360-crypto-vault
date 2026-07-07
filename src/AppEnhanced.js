@@ -29,6 +29,87 @@ const EyeIcon = ({ open }) => (
   )
 );
 
+/* VSCode-style JSON tree: foldable nodes + depth-colored (rainbow) brackets */
+const JsonPrimitive = ({ value }) => {
+  if (value === null) return <span className="json-null">null</span>;
+  switch (typeof value) {
+    case 'string': return <span className="json-str">"{value}"</span>;
+    case 'number': return <span className="json-num">{String(value)}</span>;
+    case 'boolean': return <span className="json-bool">{String(value)}</span>;
+    default: return <span className="json-str">{String(value)}</span>;
+  }
+};
+
+function JsonNode({ keyName, value, depth, isLast }) {
+  const [open, setOpen] = useState(true);
+  const isObj = value !== null && typeof value === 'object';
+  const indent = { paddingLeft: depth * 18 };
+  const bracketClass = `json-bracket d${depth % 3}`;
+
+  if (!isObj) {
+    return (
+      <div className="json-row" style={indent}>
+        <span className="json-caret spacer" />
+        {keyName !== undefined && (
+          <><span className="json-key">"{keyName}"</span><span className="json-colon">: </span></>
+        )}
+        <JsonPrimitive value={value} />
+        {!isLast && <span className="json-comma">,</span>}
+      </div>
+    );
+  }
+
+  const isArr = Array.isArray(value);
+  const entries = isArr ? value.map((v, i) => [i, v]) : Object.entries(value);
+  const openCh = isArr ? '[' : '{';
+  const closeCh = isArr ? ']' : '}';
+
+  return (
+    <>
+      <div className="json-row foldable" style={indent}>
+        <button
+          type="button"
+          className={`json-caret ${open ? 'open' : ''}`}
+          onClick={() => setOpen(o => !o)}
+          title={open ? 'Fold' : 'Unfold'}
+        >
+          ▸
+        </button>
+        {keyName !== undefined && (
+          <><span className="json-key">"{keyName}"</span><span className="json-colon">: </span></>
+        )}
+        <span className={bracketClass}>{openCh}</span>
+        {!open && (
+          <>
+            <span className="json-ellipsis" onClick={() => setOpen(true)}> ⋯ </span>
+            <span className={bracketClass}>{closeCh}</span>
+            {!isLast && <span className="json-comma">,</span>}
+            <span className="json-count">{entries.length} {isArr ? (entries.length === 1 ? 'item' : 'items') : (entries.length === 1 ? 'key' : 'keys')}</span>
+          </>
+        )}
+      </div>
+      {open && (
+        <>
+          {entries.map(([k, v], i) => (
+            <JsonNode
+              key={k}
+              keyName={isArr ? undefined : k}
+              value={v}
+              depth={depth + 1}
+              isLast={i === entries.length - 1}
+            />
+          ))}
+          <div className="json-row" style={indent}>
+            <span className="json-caret spacer" />
+            <span className={bracketClass}>{closeCh}</span>
+            {!isLast && <span className="json-comma">,</span>}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function AppEnhanced() {
   const [formData, setFormData] = useState({
     apiKey: '',
@@ -44,9 +125,10 @@ function AppEnhanced() {
   const [validationErrors, setValidationErrors] = useState({});
   const [isSmallScreen, setIsSmallScreen] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
-  const [showFormatted, setShowFormatted] = useState(false);
+  const [showFormatted, setShowFormatted] = useState(true);
   const [resultTime, setResultTime] = useState('');
   const formRef = useRef(null);
+  const outputRef = useRef(null);
 
   useEffect(() => {
     const updateIsSmallScreen = () => {
@@ -261,6 +343,11 @@ function AppEnhanced() {
     setResponse(null);
     setValidationErrors({});
 
+    // Bring the output ledger into view as soon as the operation starts
+    requestAnimationFrame(() => {
+      outputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
     try {
       const apiBase = process.env.NODE_ENV === 'development'
         ? 'http://localhost:3001'
@@ -301,7 +388,7 @@ function AppEnhanced() {
         });
       }
       setResultTime(new Date().toLocaleTimeString());
-      setShowFormatted(false);
+      setShowFormatted(true);
       setShowModal(true);
     } catch (err) {
       setResponse({
@@ -343,11 +430,13 @@ function AppEnhanced() {
   const bothCreds = formData.apiKey.trim() && formData.secretKey.trim();
   const hasResult = showModal && response;
   const outputValue = response && response.value ? response.value : '';
-  const formattedOutput = (() => {
-    if (!outputValue) return null;
-    try { return JSON.stringify(JSON.parse(outputValue), null, 2); } catch { return null; }
+  const parsedOutput = (() => {
+    if (!outputValue) return undefined;
+    try { return JSON.parse(outputValue); } catch { return undefined; }
   })();
-  const canFormat = !!formattedOutput;
+  // Only objects/arrays benefit from tree formatting
+  const canFormat = parsedOutput !== undefined && typeof parsedOutput === 'object' && parsedOutput !== null;
+  const formattedOutput = canFormat ? JSON.stringify(parsedOutput, null, 2) : null;
   const displayValue = showFormatted && canFormat ? formattedOutput : outputValue;
 
   return (
@@ -576,7 +665,7 @@ function AppEnhanced() {
           </div>
 
           {/* ===== Output ledger (always mounted) ===== */}
-          <div className="output-region">
+          <div className="output-region" ref={outputRef}>
             {hasResult ? (
               response.success ? (
                 <div className="ledger success">
@@ -619,7 +708,13 @@ function AppEnhanced() {
                     {response.value ? (
                       <div className="value-box">
                         <div className="value-scroll">
-                          <span className={`value-text ${showFormatted && canFormat ? 'formatted' : ''}`}>{displayValue}</span>
+                          {showFormatted && canFormat ? (
+                            <div className="json-tree">
+                              <JsonNode value={parsedOutput} depth={0} isLast={true} />
+                            </div>
+                          ) : (
+                            <span className="value-text">{displayValue}</span>
+                          )}
                         </div>
                       </div>
                     ) : (

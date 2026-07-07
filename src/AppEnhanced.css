@@ -572,7 +572,7 @@ input[name="secretKey"] { font-family: var(--font-mono); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ===== Output ledger ===== */
-.output-region { margin-top: var(--sp-5); }
+.output-region { margin-top: var(--sp-5); scroll-margin-top: 16px; }
 
 .ledger-empty {
   display: flex;
@@ -720,12 +720,67 @@ input[name="secretKey"] { font-family: var(--font-mono); }
   user-select: all;
 }
 
-/* Formatted (pretty-printed JSON) — preserve indentation, VSCode-style */
-.value-text.formatted {
-  display: block;
-  white-space: pre;
-  word-break: normal;
+/* ===== VSCode-style JSON tree (foldable + rainbow brackets) ===== */
+.json-tree {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
   color: var(--text-hi);
+}
+
+.json-row {
+  display: flex;
+  align-items: baseline;
+  white-space: pre;
+  border-radius: 4px;
+}
+.json-row:hover { background: rgba(255, 255, 255, 0.03); }
+
+.json-caret {
+  flex-shrink: 0;
+  width: 16px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin-right: 2px;
+  font-size: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: transform var(--t-hover) var(--ease-out), color var(--t-hover) var(--ease-out);
+  transform-origin: center;
+}
+.json-caret.open { transform: rotate(90deg); }
+.json-caret:hover { color: var(--accent); }
+.json-caret.spacer { visibility: hidden; cursor: default; }
+
+/* Editor token colors */
+.json-key { color: #9CDCFE; }
+.json-colon, .json-comma { color: var(--text-mid); }
+.json-str { color: #CE9178; white-space: pre-wrap; word-break: break-all; }
+.json-num { color: #B5CEA8; }
+.json-bool { color: #569CD6; }
+.json-null { color: #569CD6; font-style: italic; }
+
+/* Rainbow brackets — depth cycling like VSCode */
+.json-bracket { font-weight: 600; }
+.json-bracket.d0 { color: #FFD700; }
+.json-bracket.d1 { color: #DA70D6; }
+.json-bracket.d2 { color: #4FC1FF; }
+
+.json-ellipsis {
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.json-ellipsis:hover { background: rgba(240, 180, 41, 0.12); color: var(--text-hi); }
+
+.json-count {
+  margin-left: var(--sp-2);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-style: italic;
+  user-select: none;
 }
 
 /* one-shot scan sweep on success reveal */
