@@ -43,7 +43,7 @@ function AppEnhanced() {
   const [validationErrors, setValidationErrors] = useState({});
   const [isSmallScreen, setIsSmallScreen] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
-  const [showOutput, setShowOutput] = useState(true);
+  const [showFormatted, setShowFormatted] = useState(false);
   const [resultTime, setResultTime] = useState('');
   const formRef = useRef(null);
 
@@ -300,7 +300,7 @@ function AppEnhanced() {
         });
       }
       setResultTime(new Date().toLocaleTimeString());
-      setShowOutput(true);
+      setShowFormatted(false);
       setShowModal(true);
     } catch (err) {
       setResponse({
@@ -337,7 +337,12 @@ function AppEnhanced() {
   const bothCreds = formData.apiKey.trim() && formData.secretKey.trim();
   const hasResult = showModal && response;
   const outputValue = response && response.value ? response.value : '';
-  const maskedOutput = outputValue ? '•'.repeat(Math.min(outputValue.length, 64)) : '';
+  const formattedOutput = (() => {
+    if (!outputValue) return null;
+    try { return JSON.stringify(JSON.parse(outputValue), null, 2); } catch { return null; }
+  })();
+  const canFormat = !!formattedOutput;
+  const displayValue = showFormatted && canFormat ? formattedOutput : outputValue;
 
   return (
     <div className="AppEnhanced">
@@ -584,18 +589,19 @@ function AppEnhanced() {
                       <span className="field-label">Output</span>
                       {response.value && (
                         <div className="ledger-actions">
-                          <button
-                            type="button"
-                            className="ghost-btn"
-                            onClick={() => setShowOutput(s => !s)}
-                            title={showOutput ? 'Mask output' : 'Reveal output'}
-                            aria-label={showOutput ? 'Mask output' : 'Reveal output'}
-                          >
-                            <EyeIcon open={showOutput} />
-                          </button>
+                          {canFormat && (
+                            <button
+                              type="button"
+                              className={`ghost-btn text ${showFormatted ? 'active' : ''}`}
+                              onClick={() => setShowFormatted(s => !s)}
+                              title={showFormatted ? 'Show raw output' : 'Format as JSON'}
+                            >
+                              {showFormatted ? 'Raw' : 'Format'}
+                            </button>
+                          )}
                           <button
                             className="copy-btn"
-                            onClick={() => copyToClipboard(response.value)}
+                            onClick={() => copyToClipboard(displayValue)}
                             title="Copy to clipboard"
                           >
                             Copy
@@ -604,15 +610,19 @@ function AppEnhanced() {
                       )}
                     </div>
                     {response.value ? (
-                      <div className="value-box" onClick={() => copyToClipboard(response.value)} title="Click to copy">
-                        <span className="value-text">{showOutput ? response.value : maskedOutput}</span>
+                      <div className="value-box">
+                        <div className="value-scroll">
+                          <span className={`value-text ${showFormatted && canFormat ? 'formatted' : ''}`}>{displayValue}</span>
+                        </div>
                       </div>
                     ) : (
-                      <div className="value-box" style={{ cursor: 'default' }}>
-                        <span className="value-text">—</span>
+                      <div className="value-box">
+                        <div className="value-scroll">
+                          <span className="value-text">—</span>
+                        </div>
                       </div>
                     )}
-                    <span className="ledger-hint">Esc to dismiss · click value to copy</span>
+                    <span className="ledger-hint">Esc to dismiss{canFormat ? ' · Format pretty-prints JSON' : ''}</span>
                   </div>
                 </div>
               ) : (

@@ -653,6 +653,19 @@ input[name="secretKey"] { font-family: var(--font-mono); }
 }
 .ghost-btn:hover { color: var(--text-hi); border-color: var(--border-strong); }
 
+.ghost-btn.text {
+  width: auto;
+  padding: 0 10px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ghost-btn.text.active {
+  color: var(--accent);
+  border-color: rgba(240, 180, 41, 0.4);
+  background: rgba(240, 180, 41, 0.08);
+}
+
 .copy-btn {
   height: 26px;
   padding: 0 10px;
@@ -674,11 +687,15 @@ input[name="secretKey"] { font-family: var(--font-mono); }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-input);
-  padding: var(--sp-3);
-  cursor: copy;
   transition: border-color var(--t-hover) var(--ease-out);
 }
 .value-box:hover { border-color: var(--border-strong); }
+
+.value-scroll {
+  max-height: 460px;
+  overflow: auto;
+  padding: var(--sp-3);
+}
 
 .value-text {
   font-family: var(--font-mono);
@@ -687,6 +704,14 @@ input[name="secretKey"] { font-family: var(--font-mono); }
   color: var(--text-hi);
   word-break: break-all;
   user-select: all;
+}
+
+/* Formatted (pretty-printed JSON) — preserve indentation, VSCode-style */
+.value-text.formatted {
+  display: block;
+  white-space: pre;
+  word-break: normal;
+  color: var(--text-hi);
 }
 
 /* one-shot scan sweep on success reveal */
