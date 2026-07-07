@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './AppEnhanced.css';
+import versionInfo from './version.json';
 
 /* Small inline icons — no external deps */
 const LockIcon = ({ size = 16 }) => (
@@ -334,6 +335,11 @@ function AppEnhanced() {
     setShowModal(false);
   };
 
+  const buildStamp = (() => {
+    try { return new Date(versionInfo.buildTime).toLocaleString(); } catch { return versionInfo.buildTime; }
+  })();
+  const buildTitle = `Build ${versionInfo.commit} · ${buildStamp}`;
+
   const bothCreds = formData.apiKey.trim() && formData.secretKey.trim();
   const hasResult = showModal && response;
   const outputValue = response && response.value ? response.value : '';
@@ -352,6 +358,7 @@ function AppEnhanced() {
           <div className="chrome-left">
             <span className="chrome-lock"><LockIcon size={16} /></span>
             <span className="wordmark">CryptoVault</span>
+            <span className="version-chip" title={buildTitle}>v{versionInfo.version}</span>
             <span className="chrome-divider" />
             <span className="chrome-subtitle">cryptographic operations console</span>
           </div>
@@ -673,9 +680,14 @@ function AppEnhanced() {
             A cryptographic operations platform for secure hashing, encryption and decryption — used in{' '}
             <a href="https://app-engage.shiprocket.in/" target="_blank" rel="noopener noreferrer" className="inline-link">Engage-360</a>.
           </p>
-          <p className="powered-by">
-            Powered by <a href="https://app.shiprocket.in/" target="_blank" rel="noopener noreferrer"><span className="shiprocket-brand">Shiprocket</span></a>
-          </p>
+          <div className="footer-right">
+            <span className="build-tag" title={buildTitle}>
+              <span className="build-dot" /> {versionInfo.version} · #{versionInfo.commit}
+            </span>
+            <p className="powered-by">
+              Powered by <a href="https://app.shiprocket.in/" target="_blank" rel="noopener noreferrer"><span className="shiprocket-brand">Shiprocket</span></a>
+            </p>
+          </div>
         </div>
       </div>
     </div>
