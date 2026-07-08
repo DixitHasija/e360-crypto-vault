@@ -226,7 +226,7 @@ function AppEnhanced() {
         secretKey = sessionStorage.getItem('cv_secretKey') || '';
       }
     } catch { /* storage unavailable */ }
-    return { apiKey, secretKey, category: '', operation: '', value: '', keyAltName: '' };
+    return { apiKey, secretKey, category: 'Hashing', operation: '', value: '', keyAltName: '' };
   });
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState(null);
@@ -448,6 +448,14 @@ function AppEnhanced() {
       // Reset operation when category changes
       ...(name === 'category' && { operation: '' })
     }));
+    // Clear this field's validation error as soon as the user fixes it
+    setValidationErrors(prev => {
+      if (!prev[name] && !(name === 'category' && prev.operation)) return prev;
+      const next = { ...prev };
+      delete next[name];
+      if (name === 'category') delete next.operation;
+      return next;
+    });
   };
 
   const validateForm = () => {
@@ -506,9 +514,13 @@ function AppEnhanced() {
           operation: data.data.operation
         };
       } else if (data.status === 'ERROR') {
+        // Normalize: API may omit the error object or send a plain string
+        const err = (data.error && typeof data.error === 'object')
+          ? data.error
+          : { code: String(data.error || 'ERROR'), title: 'Operation failed', message: data.message || 'Unknown error' };
         resp = {
           success: false,
-          error: data.error,
+          error: err,
           message: data.message,
           statusCode: data.statusCode
         };
@@ -578,13 +590,23 @@ function AppEnhanced() {
     return values;
   };
 
+  const CSV_MAX_VALUES = 520;
+
   const handleCsvUpload = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const values = parseCsvValues(reader.result || '');
-      setCsvFile({ name: file.name, values });
+      const all = parseCsvValues(reader.result || '');
+      if (all.length > CSV_MAX_VALUES) {
+        setCsvFile(null);
+        setValidationErrors(prev => ({
+          ...prev,
+          value: `CSV has ${all.length} values — maximum ${CSV_MAX_VALUES} allowed. Split the file and retry.`
+        }));
+        return;
+      }
+      setCsvFile({ name: file.name, values: all });
       setValidationErrors(prev => ({ ...prev, value: undefined }));
     };
     reader.readAsText(file);
@@ -710,7 +732,7 @@ function AppEnhanced() {
   const resetForm = () => {
     setFormData(prev => ({
       ...prev,
-      category: '',
+      category: 'Hashing',
       operation: '',
       value: '',
       keyAltName: ''
@@ -779,6 +801,15 @@ function AppEnhanced() {
   const buildTitle = `Build ${versionInfo.commit} · ${new Date(versionInfo.buildTime).toLocaleString()}`;
 
   const bothCreds = formData.apiKey.trim() && formData.secretKey.trim();
+
+  // Run stays disabled until every required field is filled
+  const formReady = Boolean(
+    bothCreds &&
+    formData.category &&
+    formData.operation &&
+    (csvFile ? csvFile.values.length > 0 : formData.value.trim()) &&
+    (!shouldShowKeyAltName(formData.operation) || formData.keyAltName.trim())
+  );
   const hasResult = showModal && response;
   const outputValue = response && response.value ? response.value : '';
   const parsedOutput = useMemo(() => {
@@ -1077,7 +1108,12 @@ function AppEnhanced() {
                 </div>
 
                 <div className="button-group">
-                  <button type="submit" disabled={loading} className="submit-btn">
+                  <button
+                    type="submit"
+                    disabled={loading || !formReady}
+                    className="submit-btn"
+                    title={formReady ? 'Run operation (⌘↵)' : 'Fill all required fields first'}
+                  >
                     {loading ? (
                       <>
                         <span className="loading-spinner"></span>
@@ -1304,15 +1340,15 @@ function AppEnhanced() {
                   <div className="ledger-body error-info">
                     <div className="err-row">
                       <span className="err-key">Code</span>
-                      <span className="err-val code">{response.error.code}</span>
+                      <span className="err-val code">{response.error?.code || '—'}</span>
                     </div>
                     <div className="err-row">
                       <span className="err-key">Title</span>
-                      <span className="err-val">{response.error.title}</span>
+                      <span className="err-val">{response.error?.title || '—'}</span>
                     </div>
                     <div className="err-row">
                       <span className="err-key">Message</span>
-                      <span className="err-val">{response.error.message}</span>
+                      <span className="err-val">{response.error?.message || response.message || 'Unknown error'}</span>
                     </div>
                     {response.statusCode ? (
                       <div className="err-row">
